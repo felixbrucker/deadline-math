@@ -1,6 +1,7 @@
 #define NAPI_EXPERIMENTAL
 #include <node_api.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include "burstmath.c"
 
