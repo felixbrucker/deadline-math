@@ -6,6 +6,7 @@
 
 #include "swap.h"
 #include "burstmath.h"
+#include "mshabal.h"
 #include "sph_shabal.h"
 
 #define SCOOP_SIZE 64
@@ -14,6 +15,8 @@
 
 #define HASH_SIZE 32
 #define HASH_CAP 4096
+
+#define SSE4_PARALLEL 4
 
 #define SET_NONCE(gendata, nonce, offset)                                      \
   xv = (char *)&nonce;                                                         \
@@ -83,4 +86,60 @@ void calculate_deadline(CalcDeadlineRequest *req) {
   sph_shabal256_close(&deadline_sc, (uint32_t *)finals2);
 
   req->deadline = *(uint64_t *)finals2 / req->base_target;
+}
+
+void calculate_deadlines_sse4(CalcDeadlineRequest **reqs){
+  char finals[SSE4_PARALLEL][32];
+  char(*gendata)[16 + NONCE_SIZE] = (char(*)[16 + NONCE_SIZE])malloc(SSE4_PARALLEL * (16 + NONCE_SIZE) * sizeof(char));
+  char *xv;
+
+  for (int i = 0; i < SSE4_PARALLEL; i++) {
+    SET_NONCE(gendata[i], reqs[i]->account_id, 0);
+    SET_NONCE(gendata[i], reqs[i]->nonce, 8);
+  }
+
+  mshabal_context x;
+  int len;
+
+  for (int i = NONCE_SIZE; i > 0; i -= HASH_SIZE) {
+    sse4_mshabal_init(&x, 256);
+
+    len = NONCE_SIZE + 16 - i;
+    if (len > HASH_CAP)
+      len = HASH_CAP;
+
+    sse4_mshabal(&x, &gendata[0][i], &gendata[1][i], &gendata[2][i], &gendata[3][i], len);
+    sse4_mshabal_close(&x, 0, 0, 0, 0, 0, &gendata[0][i - HASH_SIZE], &gendata[1][i - HASH_SIZE],
+                       &gendata[2][i - HASH_SIZE], &gendata[3][i - HASH_SIZE]);
+  }
+
+  sse4_mshabal_init(&x, 256);
+  sse4_mshabal(&x, gendata[0], gendata[1], gendata[2], gendata[3], 16 + NONCE_SIZE);
+  sse4_mshabal_close(&x, 0, 0, 0, 0, 0, finals[0], finals[1], finals[2], finals[3]);
+
+  // XOR with final
+  for (int i = 0; i < NONCE_SIZE; i++)
+    for (int j = 0; j < SSE4_PARALLEL; j++)
+      gendata[j][i] ^= (finals[j][i % 32]);
+
+
+  mshabal_context deadline_sc;
+  sse4_mshabal_init(&deadline_sc, 256);
+  sse4_mshabal(&deadline_sc, reqs[0]->gen_sig, reqs[1]->gen_sig, reqs[2]->gen_sig, reqs[3]->gen_sig, HASH_SIZE);
+
+  uint8_t scoops[SSE4_PARALLEL][SCOOP_SIZE];
+  for (int i = 0; i < SSE4_PARALLEL; i++) {
+    memcpy(scoops[i], gendata[i] + (reqs[i]->scoop_nr * SCOOP_SIZE), 32);
+    memcpy(scoops[i] + 32, gendata[i] + ((4095 - reqs[i]->scoop_nr) * SCOOP_SIZE) + 32, 32);
+  }
+
+  free(gendata);
+
+  uint8_t finals2[SSE4_PARALLEL][HASH_SIZE];
+  sse4_mshabal(&deadline_sc, scoops[0], scoops[1], scoops[2], scoops[3], SCOOP_SIZE);
+  sse4_mshabal_close(&deadline_sc, 0, 0, 0, 0, 0, (uint32_t *)finals2[0], (uint32_t *)finals2[1],
+                     (uint32_t *)finals2[2], (uint32_t *)finals2[3]);
+
+  for (int i = 0; i < SSE4_PARALLEL; i++)
+    reqs[i]->deadline = *(uint64_t *)finals2[i] / reqs[i]->base_target;
 }

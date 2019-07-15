@@ -14,3 +14,6 @@ uint32_t calculate_scoop(uint64_t height, uint8_t *gensig);
 
 void calculate_deadline(CalcDeadlineRequest *req);
 
+void calculate_deadlines_sse4(CalcDeadlineRequest **reqs);
+
+void calculate_deadlines_avx2(CalcDeadlineRequest **reqs);

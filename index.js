@@ -1,4 +1,6 @@
 const deadlineMath = require('./build/Release/deadlinemath');
+const deadlineMathSSE4 = require('./build/Release/deadlinemath_sse4');
+const deadlineMathAVX2 = require('./build/Release/deadlinemath_avx2');
 
 module.exports = {
   calculateScoop: (height, gensig) => deadlineMath.calculate_scoop(height, Buffer.from(gensig, 'hex')),
@@ -27,7 +29,7 @@ module.exports = {
     while (calculateDeadlineData.length < populateTo) {
       calculateDeadlineData.push(calculateDeadlineData[0]);
     }
-    const func = populateTo === 4 ? deadlineMath.calculate_deadlines_sse4 : deadlineMath.calculate_deadlines_avx2;
+    const func = populateTo === 4 ? deadlineMathSSE4.calculate_deadlines_sse4 : deadlineMathAVX2.calculate_deadlines_avx2;
     const dls = func(...calculateDeadlineData.map(data => [
       data.accountId,
       data.nonce,
