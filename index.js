@@ -19,11 +19,16 @@ module.exports = {
 
       return calculateDeadlineData;
     }
+    let populateTo = 4;
+    if (calculateDeadlineData.length > 4) {
+      populateTo = 8;
+    }
     const calculateDeadlineDataOriginal = [...calculateDeadlineData];
-    while (calculateDeadlineData.length < 4) {
+    while (calculateDeadlineData.length < populateTo) {
       calculateDeadlineData.push(calculateDeadlineData[0]);
     }
-    const dls = deadlineMath.calculate_deadlines_sse4(...calculateDeadlineData.map(data => [
+    const func = populateTo === 4 ? deadlineMath.calculate_deadlines_sse4 : deadlineMath.calculate_deadlines_avx2;
+    const dls = func(...calculateDeadlineData.map(data => [
       data.accountId,
       data.nonce,
       data.scoopNr,

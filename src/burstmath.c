@@ -146,4 +146,68 @@ void calculate_deadlines_sse4(CalcDeadlineRequest **reqs){
     reqs[i]->deadline = *(uint64_t *)finals2[i] / reqs[i]->base_target;
 }
 
+void calculate_deadlines_avx2(CalcDeadlineRequest **reqs) {
+  char finals[AVX2_PARALLEL][32];
+  char(*gendata)[16 + NONCE_SIZE] = (char(*)[16 + NONCE_SIZE])malloc(AVX2_PARALLEL * (16 + NONCE_SIZE) * sizeof(char));
+  char *xv;
 
+  for (int i = 0; i < AVX2_PARALLEL; i++) {
+    SET_NONCE(gendata[i], reqs[i]->account_id, 0);
+    SET_NONCE(gendata[i], reqs[i]->nonce, 8);
+  }
+
+  mshabal256_context x;
+  int len;
+
+  for (int i = NONCE_SIZE; i;) {
+    mshabal256_init(&x);
+
+    len = NONCE_SIZE + 16 - i;
+    if (len > HASH_CAP)
+      len = HASH_CAP;
+
+    mshabal256(&x, &gendata[0][i], &gendata[1][i], &gendata[2][i], &gendata[3][i],
+               &gendata[4][i], &gendata[5][i], &gendata[6][i], &gendata[7][i], len);
+
+    i -= HASH_SIZE;
+    mshabal256_close(&x, (uint32_t *)&gendata[0][i], (uint32_t *)&gendata[1][i],
+                     (uint32_t *)&gendata[2][i], (uint32_t *)&gendata[3][i],
+                     (uint32_t *)&gendata[4][i], (uint32_t *)&gendata[5][i],
+                     (uint32_t *)&gendata[6][i], (uint32_t *)&gendata[7][i]);
+  }
+
+  mshabal256_init(&x);
+  mshabal256(&x, gendata[0], gendata[1], gendata[2], gendata[3], gendata[4], gendata[5],
+             gendata[6], gendata[7], 16 + NONCE_SIZE);
+  mshabal256_close(&x, (uint32_t *)finals[0], (uint32_t *)finals[1],
+                   (uint32_t *)finals[2], (uint32_t *)finals[3], (uint32_t *)finals[4],
+                   (uint32_t *)finals[5], (uint32_t *)finals[6], (uint32_t *)finals[7]);
+
+  // XOR with final
+  for (int i = 0; i < NONCE_SIZE; i++)
+    for (int j = 0; j < AVX2_PARALLEL; j++)
+      gendata[j][i] ^= (finals[j][i % 32]);
+
+  mshabal256_context deadline_sc;
+  mshabal256_init(&deadline_sc);
+  mshabal256(&deadline_sc, reqs[0]->gen_sig, reqs[1]->gen_sig, reqs[2]->gen_sig, reqs[3]->gen_sig, reqs[4]->gen_sig,
+             reqs[5]->gen_sig, reqs[6]->gen_sig, reqs[7]->gen_sig, HASH_SIZE);
+
+  uint8_t scoops[AVX2_PARALLEL][SCOOP_SIZE];
+  for (int i = 0; i < AVX2_PARALLEL; i++) {
+    memcpy(scoops[i], gendata[i] + (reqs[i]->scoop_nr * SCOOP_SIZE), 32);
+    memcpy(scoops[i] + 32, gendata[i] + ((4095 - reqs[i]->scoop_nr) * SCOOP_SIZE) + 32, 32);
+  }
+
+  uint8_t finals2[AVX2_PARALLEL][HASH_SIZE];
+  mshabal256(&deadline_sc, scoops[0], scoops[1], scoops[2], scoops[3], scoops[4], scoops[5],
+             scoops[6], scoops[7], SCOOP_SIZE);
+
+  mshabal256_close(&deadline_sc, (uint32_t *)finals2[0], (uint32_t *)finals2[1],
+                   (uint32_t *)finals2[2], (uint32_t *)finals2[3],
+                   (uint32_t *)finals2[4], (uint32_t *)finals2[5],
+                   (uint32_t *)finals2[6], (uint32_t *)finals2[7]);
+
+  for (int i = 0; i < AVX2_PARALLEL; i++)
+    reqs[i]->deadline = *(uint64_t *)finals2[i] / reqs[i]->base_target;;
+}

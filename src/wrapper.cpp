@@ -92,6 +92,53 @@ napi_value calculate_deadlines_sse4_wrapper(napi_env env, napi_callback_info inf
     return deadlines;
 }
 
+napi_value calculate_deadlines_avx2_wrapper(napi_env env, napi_callback_info info) {
+    size_t argc = 8;
+    napi_value args[8];
+    napi_status status;
+    status = napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    CalcDeadlineRequest reqsStored[8];
+    uint32_t i;
+    for (i = 0; i < 8; i++) {
+      napi_value accountIdNapi;
+      napi_value nonceNapi;
+      napi_value scoopNrNapi;
+      napi_value baseTargetNapi;
+      napi_value genSigNapi;
+
+      status = napi_get_element(env, args[i], 0, &accountIdNapi);
+      status = napi_get_element(env, args[i], 1, &nonceNapi);
+      status = napi_get_element(env, args[i], 2, &scoopNrNapi);
+      status = napi_get_element(env, args[i], 3, &baseTargetNapi);
+      status = napi_get_element(env, args[i], 4, &genSigNapi);
+
+      reqsStored[i] = buildDeadlineRequest(env, accountIdNapi, nonceNapi, scoopNrNapi, baseTargetNapi, genSigNapi);
+    }
+
+    CalcDeadlineRequest* reqsPointers[8] = {
+        &reqsStored[0],
+        &reqsStored[1],
+        &reqsStored[2],
+        &reqsStored[3],
+        &reqsStored[4],
+        &reqsStored[5],
+        &reqsStored[6],
+        &reqsStored[7]
+    };
+    calculate_deadlines_avx2(reqsPointers);
+
+    napi_value deadlines;
+    status = napi_create_array(env, &deadlines);
+    for (i = 0; i < 8; i++) {
+      napi_value dl;
+      status = napi_create_bigint_uint64(env, reqsPointers[i]->deadline, &dl);
+      status = napi_set_element(env, deadlines, i, dl);
+    }
+
+    return deadlines;
+}
+
 CalcDeadlineRequest buildDeadlineRequest(napi_env env, napi_value accountIdNapi, napi_value nonceNapi, napi_value scoopNrNapi, napi_value baseTargetNapi, napi_value genSigNapi) {
       napi_status status;
       char *accountIdString;
@@ -193,6 +240,16 @@ napi_value Init(napi_env env, napi_value exports) {
     }
 
     status = napi_set_named_property(env, exports, "calculate_deadlines_sse4", fn);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "Unable to populate exports");
+    }
+
+    status = napi_create_function(env, NULL, 0, calculate_deadlines_avx2_wrapper, NULL, &fn);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "Unable to wrap native function");
+    }
+
+    status = napi_set_named_property(env, exports, "calculate_deadlines_avx2", fn);
     if (status != napi_ok) {
         napi_throw_error(env, NULL, "Unable to populate exports");
     }
