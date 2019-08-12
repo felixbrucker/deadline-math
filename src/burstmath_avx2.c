@@ -199,6 +199,8 @@ void calculate_deadlines_avx2(CalcDeadlineRequest **reqs) {
     memcpy(scoops[i] + 32, gendata[i] + ((4095 - reqs[i]->scoop_nr) * SCOOP_SIZE) + 32, 32);
   }
 
+  free(gendata);
+
   uint8_t finals2[AVX2_PARALLEL][HASH_SIZE];
   mshabal256(&deadline_sc, scoops[0], scoops[1], scoops[2], scoops[3], scoops[4], scoops[5],
              scoops[6], scoops[7], SCOOP_SIZE);
